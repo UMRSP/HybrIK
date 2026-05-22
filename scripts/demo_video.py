@@ -14,7 +14,8 @@ from tqdm import tqdm
 from hybrik.models import builder
 from hybrik.utils.config import update_config
 from hybrik.utils.presets import SimpleTransform3DSMPLCam
-from hybrik.utils.render_pytorch3d import render_mesh
+# Commented out to prevent pytorch3d import errors
+# from hybrik.utils.render_pytorch3d import render_mesh
 from hybrik.utils.vis import get_max_iou_box, get_one_box, vis_2d
 
 det_transform = T.Compose([T.ToTensor()])
@@ -33,13 +34,11 @@ def xyxy2xywh(bbox):
 def get_video_info(in_file):
     stream = cv2.VideoCapture(in_file)
     assert stream.isOpened(), 'Cannot capture source'
-    # self.path = input_source
     datalen = int(stream.get(cv2.CAP_PROP_FRAME_COUNT))
     fourcc = int(stream.get(cv2.CAP_PROP_FOURCC))
     fps = stream.get(cv2.CAP_PROP_FPS)
     frameSize = (int(stream.get(cv2.CAP_PROP_FRAME_WIDTH)),
                  int(stream.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    # bitrate = int(stream.get(cv2.CAP_PROP_BITRATE))
     videoinfo = {'fourcc': fourcc, 'fps': fps, 'frameSize': frameSize}
     stream.release()
 
@@ -54,7 +53,7 @@ def recognize_video_ext(ext=''):
     elif ext == 'mov':
         return cv2.VideoWriter_fourcc(*'XVID'), '.' + ext
     else:
-        print("Unknow video format {}, will use .mp4 instead of it".format(ext))
+        print("Unknown video format {}, will use .mp4 instead of it".format(ext))
         return cv2.VideoWriter_fourcc(*'mp4v'), '.mp4'
 
 
@@ -64,10 +63,6 @@ parser.add_argument('--gpu',
                     help='gpu',
                     default=0,
                     type=int)
-# parser.add_argument('--img-path',
-#                     help='image name',
-#                     default='',
-#                     type=str)
 parser.add_argument('--video-name',
                     help='video name',
                     default='',
@@ -81,9 +76,7 @@ parser.add_argument('--save-pk', default=False, dest='save_pk',
 parser.add_argument('--save-img', default=False, dest='save_img',
                     help='save prediction', action='store_true')
 
-
 opt = parser.parse_args()
-
 
 cfg_file = 'configs/256x192_adam_lr1e-3-hrw48_cam_2x_w_pw3d_3dhp.yaml'
 CKPT = './pretrained_models/hybrik_hrnet.pth'
@@ -105,12 +98,10 @@ res_keys = [
     'pred_xyz_24_struct',
     'pred_scores',
     'pred_camera',
-    # 'f',
     'pred_betas',
     'pred_thetas',
     'pred_phi',
     'pred_cam_root',
-    # 'features',
     'transl',
     'transl_camsys',
     'bbox',
@@ -133,7 +124,6 @@ transformation = SimpleTransform3DSMPLCam(
     loss_type=cfg.LOSS['TYPE'])
 
 det_model = fasterrcnn_resnet50_fpn(pretrained=True)
-
 hybrik_model = builder.build_sppe(cfg.MODEL)
 
 print(f'Loading model from {CKPT}...')
@@ -188,8 +178,7 @@ if not write_stream.isOpened():
 assert write_stream.isOpened(), 'Cannot open video for writing'
 assert write2d_stream.isOpened(), 'Cannot open video for writing'
 
-os.system(f'ffmpeg -i {opt.video_name} {opt.out_dir}/raw_images/{video_basename}-%06d.png')
-
+os.system(f'ffmpeg -y -i {opt.video_name} {opt.out_dir}/raw_images/{video_basename}-%06d.png')
 
 files = os.listdir(f'{opt.out_dir}/raw_images')
 files.sort()
@@ -198,13 +187,14 @@ img_path_list = []
 
 for file in tqdm(files):
     if not os.path.isdir(file) and file[-4:] in ['.jpg', '.png']:
-
         img_path = os.path.join(opt.out_dir, 'raw_images', file)
         img_path_list.append(img_path)
 
 prev_box = None
-renderer = None
-smpl_faces = torch.from_numpy(hybrik_model.smpl.faces.astype(np.int32))
+
+# Renderer removed to bypass PyTorch3D requirement
+# renderer = None
+# smpl_faces = torch.from_numpy(hybrik_model.smpl.faces.astype(np.int32))
 
 print('### Run Model...')
 idx = 0
@@ -240,38 +230,13 @@ for img_path in tqdm(img_path_list):
         uv_29 = pose_output.pred_uvd_jts.reshape(29, 3)[:, :2]
         transl = pose_output.transl.detach()
 
-        # Visualization
-        image = input_image.copy()
-        focal = 1000.0
-        bbox_xywh = xyxy2xywh(bbox)
-        transl_camsys = transl.clone()
-        transl_camsys = transl_camsys * 256 / bbox_xywh[2]
-
-        focal = focal / 256 * bbox_xywh[2]
-
-        vertices = pose_output.pred_vertices.detach()
-
-        verts_batch = vertices
-        transl_batch = transl
-
-        color_batch = render_mesh(
-            vertices=verts_batch, faces=smpl_faces,
-            translation=transl_batch,
-            focal_length=focal, height=image.shape[0], width=image.shape[1])
-
-        valid_mask_batch = (color_batch[:, :, :, [-1]] > 0)
-        image_vis_batch = color_batch[:, :, :, :3] * valid_mask_batch
-        image_vis_batch = (image_vis_batch * 255).cpu().numpy()
-
-        color = image_vis_batch[0]
-        valid_mask = valid_mask_batch[0].cpu().numpy()
-        input_img = image
-        alpha = 0.9
-        image_vis = alpha * color[:, :, :3] * valid_mask + (
-            1 - alpha) * input_img * valid_mask + (1 - valid_mask) * input_img
-
-        image_vis = image_vis.astype(np.uint8)
-        image_vis = cv2.cvtColor(image_vis, cv2.COLOR_RGB2BGR)
+        # ==========================================
+        # 3D MESH RENDERER BYPASS
+        # ==========================================
+        # We skip the entire 3D mesh rendering block.
+        # To keep the video writer functional without crashing, 
+        # we simply pass the raw frame as the 3D output.
+        image_vis = cv2.cvtColor(input_image.copy(), cv2.COLOR_RGB2BGR)
 
         if opt.save_img:
             idx += 1
@@ -279,12 +244,57 @@ for img_path in tqdm(img_path_list):
             cv2.imwrite(res_path, image_vis)
         write_stream.write(image_vis)
 
-        # vis 2d
+# ==========================================
+        # 2D SKELETON VISUALIZATION
+        # ==========================================
+        bbox_xywh = xyxy2xywh(bbox)
         pts = uv_29 * bbox_xywh[2]
         pts[:, 0] = pts[:, 0] + bbox_xywh[0]
         pts[:, 1] = pts[:, 1] + bbox_xywh[1]
+        
+        pts_np = pts.cpu().numpy()
+        
         image = input_image.copy()
-        bbox_img = vis_2d(image, tight_bbox, pts)
+
+        # Define skeleton links for HybrIK's SMPL 29-point format
+        # Joints 0-23 are standard SMPL. Joints 24-28 are facial points.
+        skeleton_links = [
+            # Spine and Head (Pelvis -> Spine1 -> Spine2 -> Spine3 -> Neck -> Head)
+            (0, 3), (3, 6), (6, 9), (9, 12), (12, 15),
+            
+            # Left Leg (Pelvis -> L_Hip -> L_Knee -> L_Ankle -> L_Foot)
+            (0, 1), (1, 4), (4, 7), (7, 10),(10, 27),
+            
+            # Right Leg (Pelvis -> R_Hip -> R_Knee -> R_Ankle -> R_Foot)
+            (0, 2), (2, 5), (5, 8), (8, 11),(11, 28),
+            
+            # Left Arm (Spine3 -> L_Collar -> L_Shoulder -> L_Elbow -> L_Wrist -> L_Hand)
+            (9, 13), (13, 16), (16, 18), (18, 20), (20, 22),(22, 25),
+            
+            # Right Arm (Spine3 -> R_Collar -> R_Shoulder -> R_Elbow -> R_Wrist -> R_Hand)
+            (9, 14), (14, 17), (17, 19), (19, 21), (21, 23),(23, 26), 
+            
+            # Facial points: Nose(24), R_Eye(25), L_Eye(26), R_Ear(27), L_Ear(28)
+            (15, 24)
+        ]
+
+        # Draw the bones (lines) manually using the numpy array
+        for link in skeleton_links:
+            p1 = tuple(pts_np[link[0]].astype(int))
+            p2 = tuple(pts_np[link[1]].astype(int))
+            # Draw line with color (cyan) and thickness 2
+            cv2.line(image, p1, p2, (255, 255, 0), 2)
+        # ==========================================
+        # MODO DEBUG: Escribir el número de cada punto
+        # ==========================================
+        for i, pt in enumerate(pts_np):
+            x, y = int(pt[0]), int(pt[1])
+            # Dibujar un pequeño círculo rojo en el punto
+            cv2.circle(image, (x, y), 3, (0, 0, 255), -1)
+            # Escribir el índice (número) del punto en color blanco
+            cv2.putText(image, str(i), (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # Draw bounding box and points over the lines
+        bbox_img = vis_2d(image, tight_bbox, pts_np)
         bbox_img = cv2.cvtColor(bbox_img, cv2.COLOR_RGB2BGR)
         write2d_stream.write(bbox_img)
 
@@ -293,6 +303,9 @@ for img_path in tqdm(img_path_list):
                 opt.out_dir, 'res_2d_images', f'image-{idx:06d}.jpg')
             cv2.imwrite(res_path, bbox_img)
 
+        # ==========================================
+        # SAVE JOINT DATA TO PICKLE
+        # ==========================================
         if opt.save_pk:
             assert pose_input.shape[0] == 1, 'Only support single batch inference for now'
 
@@ -316,25 +329,25 @@ for img_path in tqdm(img_path_list):
             pred_cam_root = pose_output.cam_root.squeeze(dim=0).cpu().numpy()
             img_size = np.array((input_image.shape[0], input_image.shape[1]))
 
+            transl_camsys = transl.clone()
+            transl_camsys = transl_camsys * 256 / bbox_xywh[2]
+
             res_db['pred_xyz_17'].append(pred_xyz_jts_17)
             res_db['pred_uvd'].append(pred_uvd_jts)
             res_db['pred_xyz_29'].append(pred_xyz_jts_29)
             res_db['pred_xyz_24_struct'].append(pred_xyz_jts_24_struct)
             res_db['pred_scores'].append(pred_scores)
             res_db['pred_camera'].append(pred_camera)
-            # res_db['f'].append(1000.0)
             res_db['pred_betas'].append(pred_betas)
             res_db['pred_thetas'].append(pred_theta)
             res_db['pred_phi'].append(pred_phi)
             res_db['pred_cam_root'].append(pred_cam_root)
-            # res_db['features'].append(img_feat)
             res_db['transl'].append(transl[0].cpu().data.numpy())
             res_db['transl_camsys'].append(transl_camsys[0].cpu().data.numpy())
             res_db['bbox'].append(np.array(bbox))
             res_db['height'].append(img_size[0])
             res_db['width'].append(img_size[1])
             res_db['img_path'].append(img_path)
-
 
 if opt.save_pk:
     n_frames = len(res_db['img_path'])
